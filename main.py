@@ -17,11 +17,10 @@ import numpy as np
 nodes = ['a', 'b','c','d','e','f','g','h']
 edges = {'a':['b','d','e'], 'b':['a','g','f'],'c':['g','f','d'], 'd': ['a','c','h'], 'e':['a','h','f'],'f':['b','c','e'],'g':['b','c','h'],'h':['d','e','g']}
 stream_rates = {'a':5, 'b': 8,'c':2,'d':5,'e':2,'f':4,'g':3,'h':8}
-#stream_range = [67, 100] # light: 12-30; busy: 30-67; jam: >67
-stream_range = [30, 50] # light: 10-20; busy: 20-30; jam: >30 [30-100 [30-50]
+stream_range = [10, 20] # light: 10-20; busy: 20-30; jam: >30 [30-100 [30-50]
 graph = Graph(nodes, edges, stream_rates)
 threshold = 100 #should be a constant value  2*stream_range[1]
-DIS_THRESHOLD = 1
+
 total_duration = 120  #240
 minimum_waiting_time = 15  #60  120/8 = 15
 speed_same = 0.05
@@ -41,7 +40,7 @@ lane_h = Lane('h')
 lane_list = {'a':lane_a, 'b':lane_b,'c':lane_c,'d':lane_d,'e':lane_e,'f':lane_f,'g':lane_g,'h':lane_h}
 cross_crash_threshold = 0.5  #1.3 # calcualte from two curved lane. 
 straight_carsh_threshold = 0.5
-
+DIS_THRESHOLD = 0.01
 
 solution = {(-1, -1):[-1000, -1000], (0, -1):[-1000, -1000], (1, -1):[-1000, -1000],
 				(-1, 0):[-1000, -1000], (0, 0):[-1000, -1000], (1, 0):[-1000, -1000],
@@ -91,121 +90,121 @@ def tellCollapse(cars):
 	accident = 0
 	pre_accident = 0
 	crash_cars = []
+
 	for i in range(len(cars)):
 		for j in range(i+1, len(cars)):
-			dis = distance(cars[i].predict_location(lane_list[cars[i].road_name]),cars[j].predict_location(lane_list[cars[j].road_name]))
+			#print(cars[i].location, cars[j].location)
+			dis = distance(cars[i].predict_location(),cars[j].predict_location())
 			if dis <= cross_crash_threshold:
 				pre_accident = pre_accident + 1
-
+				# the accident is predicted on the same lane. 
 				if cars[i].road_name == cars[j].road_name:
 					crash_solution = strategic1(cars[i], cars[j])
-					if crash_solution == []:
-						accident = accident+1
-						crash_cars.append(cars[i])
-						crash_cars.append(cars[j])
-					else:
-						
-						cars[i].speed = cars[i].speed + cars[i].deta * crash_solution[0][0]
-						cars[j].speed = cars[j].speed + cars[j].deta * crash_solution[0][1]
+					cars[i].speed = cars[i].speed + cars[i].deta * crash_solution[0][1]
+					cars[j].speed = cars[j].speed + cars[j].deta * crash_solution[0][0]
+					change_speed_after(lane_list[cars[i].road_name].car_list, cars[i])
+					change_speed_after(lane_list[cars[j].road_name].car_list, cars[j])
 
+				# the accident is predicted on different lanes.
 				else:
 					crash_solution = strategic2(cars[i], cars[j])
+					cars[i].speed = cars[i].speed + cars[i].deta * crash_solution[0][1]
+					cars[j].speed = cars[j].speed + cars[j].deta * crash_solution[0][0]
+					change_speed_after(lane_list[cars[i].road_name].car_list, cars[i])
+					change_speed_after(lane_list[cars[j].road_name].car_list, cars[j])
 
-					if crash_solution == None:
-						accident = accident+1
-						crash_cars.append(cars[i])
-						crash_cars.append(cars[j])
-					else:
-						cars[i].speed = cars[i].speed + cars[i].deta * crash_solution[0][0]
-						cars[j].speed = cars[j].speed + cars[j].deta * crash_solution[0][1]
+	#return crash_cars, accident, pre_accident
+	return pre_accident
 
-	return crash_cars, accident, pre_accident
+
+def dec_payoff(cari):
+
+	if cari.speed-cari.deta <= 0:
+		return -1000
+	else:
+		return L/cari.speed - L/(cari.speed - cari.deta)
 
 
 def acc_payoff(cari):
 
-	t = distance(cari.location, cari.neighbors[0].location)/(cari.speed+cari.deta - cari.neighbors[0].speed)
-	#return -10*1/t
-	return -10 * math.exp(-(distance(cari.location, cari.neighbors[0].location)/(cari.speed+cari.deta - cari.neighbors[0].speed)))
+	if cari.neighbors[0] == None:
+		return 1000
+	else:
+		if cari.speed+cari.deta  == cari.neighbors[0].speed:
+			return 1000
+		else:
+
+			t = distance(cari.location, cari.neighbors[0].location)/(cari.speed+cari.deta - cari.neighbors[0].speed)
+			if t == 0:
+				return 1000
+			else:
+			#print('[location] =', cari.location,'[neighbor]=',cari.neighbors[0].location,'[t] = ', t)
+				return -10/t
 	
+def change_speed_after(car_list, car):
+
+	target_ibdex = car_list.index(car)
+	for i in range(target_ibdex+1, len(car_list)):
+		car_list[i].speed = car.speed
+
+
+
 
 ## strategic game in scenario-1: same lane
+## return (v_j, v_i)
 def strategic1(cari, carj):
+
+	#print('strategic-1')
 	result = []
 	if carj.speed - carj.deta > 0:
-		f_j = {-1: L/carj.speed - L/(carj.speed - carj.deta), 0: -1000, 1: -1000}
+		f_j = {-1: dec_payoff(carj), 0:0, 1: -1000}
 	else:
-		f_j = {-1: -1000, 0: -1000, 1: -1000}
-	if cari.neighbors[0] == None:
-		f_i = {-1: -1000, 0: 0, 1: 1000}
-	else:
-		if round(cari.speed+cari.deta - cari.neighbors[0].speed, 2) == 0:
-			f_i = {-1: -1000, 0: 0, 1: 1000}
-		else:
-			f_i = {-1: -1000, 0:0, 1: acc_payoff(cari)}
+		f_j = {-1: -1000, 0:0, 1: -1000}
+
+	f_i = {-1: -1000, 0:0, 1: acc_payoff(cari)}
+
 	solution[(-1, 0)] = [f_j[-1], f_i[0]]
 	solution[(-1, 1)] = [f_j[-1], f_i[1]]
 	solution[(0, 1)] = [f_j[0], f_i[1]]
 
-	# pick a solution mainly from three options: (-1, 0), (-1, 1), (0, 1)
-
 	if solution[(-1, 0)][1] > solution[(-1, 1)][1]:
-
 		result.append((-1, 0))
-
-	if solution[(0, 1)][0] > solution[(-1, 1)][0]:
-
+	if solution[(0, 1)][0] > solution[(-1, 1)][1]:
 		result.append((0, 1))
-
+	if solution[(-1, 1)][0] >= solution[(-1, 0)][0] and solution[(-1, 1)][1] >= solution[(0, 1)][1]:
+		result.append((-1, 1))
 	if len(result) > 1:
 
 		a = np.array([result[i][0]+ result[i][0] for i in range(len(result))])
 		return [result[np.argmax(a)]]
 
-	return result
+	return result  
 
 
 ## strategic game in scenario-2: crossing lane
-
-def strategic2(cari, carj):
+## return (v_j, v_i)
+def strategic2(cari, carj): 
+	#print('strategic-2')
 	result_i = []
 	result_j = []
-	result = []
-	if cari.neighbors[0] == None and cari.speed - cari.deta > 0:
-		f_i = {-1: L/cari.speed - L/(cari.speed - cari.deta) , 0: 0 , 1: 1000}
-	elif cari.neighbors[0] == None:
-		f_i = {-1: -1000 , 0: 0 , 1:1000}
+
+	f_j = {-1: dec_payoff(carj), 0:0, 1:acc_payoff(carj)}
+	f_i = {-1: dec_payoff(cari), 0:0, 1:acc_payoff(cari)}
+
+	if cari.speed == carj.speed:
+		solution[(-1, -1)] = [-1000, -1000]
+		solution[(1, 1)] = [-1000, -1000]
+
 	else:
-		if round(cari.speed+cari.deta - cari.neighbors[0].speed, 2) == 0:
-			f_i = {-1:-1000, 0: 0 , 1: 1000}
-		else:
-			#f_i = {-1:-1000, 0: 0 , 1: - 10 * math.exp(-round((distance(cari.location, cari.neighbors[0].location)/(cari.speed+cari.deta - cari.neighbors[0].speed)),2))}
-			f_i = {-1: -1000, 0:0, 1: acc_payoff(cari)}
-	if carj.neighbors[0] == None and carj.speed - carj.deta > 0:
-		f_j = {-1: L/carj.speed - L/(carj.speed - carj.deta) , 0: 0 , 1:1000}
-	elif carj.neighbors[0] == None:
-		f_j = {-1: -1000 , 0: 0 , 1:1000}
-	else :
-		if round(carj.speed+carj.deta - carj.neighbors[0].speed, 2) == 0:
-			f_j = {-1:-1000, 0: 0 , 1: 1000}
-		else:
-			f_j = {-1: -1000, 0:0, 1: acc_payoff(carj)}
-	# have the same speed
-	if abs(cari.speed - carj.speed) < speed_same:
+		solution[(-1, -1)] = [f_j[-1], f_i[-1]]
+		solution[(1, 1)] = [f_j[1], f_i[1]]
 
-		solution[(-1, 0)] = [f_i[-1], f_j[0]]
-		solution[(-1, 1)] = [f_i[-1], f_j[1]]
-		solution[(0, -1)] = [f_i[0], f_j[-1]]
-		solution[(0, 1)] = [f_i[0], f_j[1]]
-		solution[(1, -1)] = [f_i[1], f_j[-1]]
-		solution[(1, 0)] = [f_i[1], f_j[0]]
-
-	# speeds are different
-	else:
-
-		for key in solution.keys():
-			solution[key] = [f_i[key[0]], f_j[key[1]]]
-		solution[(0, 0)] = [-1000, -1000]
+	solution[(-1, 0)] = [f_j[-1], f_i[0]]
+	solution[(-1, 1)] = [f_j[-1], f_i[1]]
+	solution[(0, -1)] = [f_j[0], f_i[-1]]
+	solution[(0, 1)] = [f_j[0], f_i[1]]
+	solution[(1, -1)] = [f_j[1], f_i[-1]]
+	solution[(1, 0)] = [f_j[1], f_i[0]]
 
 	## find the solution:
 
@@ -213,27 +212,24 @@ def strategic2(cari, carj):
 	b = np.array([solution[(k, 0)][0] for k in [-1, 0, 1]])
 	c = np.array([solution[(k, 1)][0] for k in [-1, 0, 1]])
 
-	result_i.append(((np.argmax(a))-1, -1))
-	result_i.append(((np.argmax(b))-1, 0))
-	result_i.append(((np.argmax(c))-1, 1))
+	result_j.append(((np.argmax(a))-1, -1))
+	result_j.append(((np.argmax(b))-1, 0))
+	result_j.append(((np.argmax(c))-1, 1))
 
 	e = np.array([solution[(-1,k)][1] for k in [-1, 0, 1]])
 	f = np.array([solution[(0,k)][1] for k in [-1, 0, 1]])
 	g = np.array([solution[(1,k)][1] for k in [-1, 0, 1]])
-	result_j.append((-1, (np.argmax(e))-1))
-	result_j.append((0, np.argmax(f)-1))
-	result_j.append((1, np.argmax(g)-1))
+	result_i.append((-1, (np.argmax(e))-1))
+	result_i.append((0, np.argmax(f)-1))
+	result_i.append((1, np.argmax(g)-1))
 
 	result = [val for val in result_j if val in result_i]
-	
-	#print('[intersection]=',result )
-	
+
 	if len(result) > 1:
 
 		res = np.array([result[i][0]+ result[i][0] for i in range(len(result))])
-		#print('[AFTER]',[result[np.argmax(res)]])
+		#print('[2-result]=', [result[np.argmax(res)]])
 		return [result[np.argmax(res)]]
-
 	return result
 
 def remove_accidents(all_cars, accident_cars):
@@ -254,121 +250,82 @@ def generate_car(stream, speed):
 	return (stream*s)/3600
 
 
+def current_accident(all_cars):
+	count = 0
+	crash_cars = []
+	for i in range(len(all_cars)):
+		for j in range(i+1, len(all_cars)):
+			if distance(all_cars[i].location, all_cars[j].location) < DIS_THRESHOLD and all_cars[i].name!= all_cars[j].name:
+				count = count + 1
+				if all_cars[i] not in crash_cars:
+					crash_cars.append(all_cars[i])
+				if all_cars[j] not in crash_cars:
+					crash_cars.append(all_cars[j])
+				
+	return count, crash_cars
 
 
-
-
+def remove_crash_cars(car_list):
+	for car in car_list:
+		lane = car.road_name
+		lane_list[lane].car_list.remove(car)
 ###############################################################################################################################################
 
-iteration = 10
-TEST = 20
+rounds = 10
+experiment = 10
+deno = rounds*experiment
 
 stat_pass_cars = []
 stat_accident = []
 stat_pred_accident = []
 
-for t in range(TEST):
-
-	avg_pass_cars = 0
-	avg_accident = 0
-	avg_pre_accident = 0
 
 
-	for i in range(iteration):
-
-	#print('[iteration] = ', iteration)
-		dynamic_change(stream_rates,stream_range)
-		i_nodes = copy.deepcopy(nodes)
-		i_edges = copy.deepcopy(edges)
-		i_stream_rate = copy.deepcopy(stream_rates)
-
-		graph = Graph(i_nodes, i_edges, i_stream_rate)
-	### Test the ID-Dijkstra ALgorithm
-		coalitions = dk.coalition(graph, i_stream_rate,threshold)
-	### Test the Baseline 
-		#coalitions = baseline[0]
-		group_lanes = [e[0] for e in coalitions]
-		group_streams = [e[1] for e in coalitions]
-		# print('[group_lanes] = ', group_lanes)
-		# print('[streams] = ', group_streams)
-		# print('[interval_times] = ', interval_time(group_streams, total_duration,minimum_waiting_time))
-		interval_times = interval_time(group_streams, total_duration,minimum_waiting_time)
-		#interval_times = list(interval_time(group_streams, total_duration,minimum_waiting_time)['x'])
-		total_number = 0
-		pass_cars = []
-		accident = 0
-		pre_acc = 0
-		streams = {lane: stream_rates[lane] for lane in nodes}
-		prob_car = {lane: generate_car(streams[lane], 0.025) for lane in nodes}
-
-
-		for i in range(len(coalitions)):
-		
-		#print('[coalitoin] = ', i)
-			group = coalitions[i][0]
-			all_cars = []
-		
-			for j in range(int(interval_times[i])):
-		
-			#current_carsh(all_cars)
-				for lane in group:
-				## remove all the cars who already went out from the intersection. 
-				## update all cars' positions
-					remov_car = lane_list[lane].update_cars()
-					if len(remov_car)>0:
-						for i in remov_car:
-							if i in all_cars:
-								all_cars.remove(i)
-							pass_cars.append(i)
-							del i
-					draw = random.uniform(0, 1)
-					if draw < prob_car[lane]:
-						new_car = Car(lane)
-						lane_list[lane].car_list.append(new_car)
-						all_cars.append(new_car)
-						total_number =+ 1
-
-			crash_result = tellCollapse(all_cars)
-			remove_accidents(all_cars, crash_result[0])
-			accident = accident+ crash_result[1]
-			pre_acc = pre_acc + crash_result[2]
-
-		
-		avg_accident = avg_accident + accident 
-		avg_pass_cars = avg_pass_cars + len(pass_cars)
-		avg_pre_accident = avg_pre_accident + pre_acc
-
-	stat_pass_cars.append(avg_pass_cars/iteration)
-	stat_accident.append(avg_accident/iteration)
-	stat_pred_accident.append(avg_pre_accident/iteration)
-
-
-#print('[baseline5]')
-
-print('[avg_throughput]= ', stat_pass_cars)
-print('[avg_accident]= ', stat_accident)
-print('[avg_pred_accident]= ', stat_pred_accident)
-
-
-
-			
-
-
-
-
-
-
-# def knuth_shuffle(items):
-#     """
-#     Fisher-Yates shuffle or Knuth shuffle which name is more famous.
-#     Post constrain: return array of the same length of input but with random order
-#     """
-#     #print(items)
-#     for i in range(len(items)):
-#         j = random.randrange(i, len(items))
-#         items[i], items[j] = items[j], items[i]
-#     return items
-
-
-
+for t in range(experiment):
 	
+	dynamic_change(stream_rates,stream_range)
+	i_nodes = copy.deepcopy(nodes)
+	i_edges = copy.deepcopy(edges)
+	i_stream_rate = copy.deepcopy(stream_rates)
+	graph = Graph(i_nodes, i_edges, i_stream_rate)
+	#coalitions = dk.coalition(graph, i_stream_rate,threshold)
+	coalitions = baseline[1]
+	group_lanes = [e[0] for e in coalitions]
+	group_streams = [e[1] for e in coalitions]
+	interval_times = interval_time(group_streams, total_duration,minimum_waiting_time)
+	streams = {lane: stream_rates[lane] for lane in nodes}
+	prob_car = {lane: generate_car(streams[lane], 0.025) for lane in nodes}
+
+	total_number = 0
+	pass_cars = 0
+	accident = 0
+	pre_acc = 0
+
+	for i in range(rounds):
+		#dynamic_change(stream_rates,stream_range)
+		for c in range(len(coalitions)):
+			group = coalitions[c][0]
+			for j in range(int(interval_times[c])):
+				all_cars = []
+				for lane in group:
+					all_cars = all_cars + lane_list[lane].car_list
+				pre_acc = pre_acc + tellCollapse(all_cars)
+				accident_analysis = current_accident(all_cars)
+				accident = accident + accident_analysis[0]
+				remove_crash_cars(accident_analysis[1])
+				
+				for lane in group:
+					pass_cars = pass_cars + lane_list[lane].move_all()
+					if random.uniform(0, 1) < prob_car[lane]:
+						lane_list[lane].car_list.append(Car(lane, lane+str(i)))
+	
+
+	stat_pass_cars.append(pass_cars/rounds)
+	stat_accident.append(accident/rounds)
+	stat_pred_accident.append(pre_acc/rounds)
+
+print('baseline')
+print('[stat_throughput]= ', stat_pass_cars)
+print('[stat_accident]= ', stat_accident)
+print('[stat_pred_accident]= ', stat_pred_accident)
+
