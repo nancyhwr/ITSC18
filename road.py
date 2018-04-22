@@ -21,6 +21,17 @@ class Lane:
 		self.car_list=[]
 
 
+	def move_all(self):
+		remove_cars = []
+		for car in self.car_list:
+			car.run()
+			if car.location[0]>=8 or car.location[0]<=0 or car.location[1]>=8 or car.location[1]<=0:
+				remove_cars.append(car)
+		for car in remove_cars:
+			self.car_list.remove(car)
+		return (len(remove_cars))
+		
+
 
 	# return the location for each car in the next time
 	def next_location(self, location, delta_x):
@@ -78,21 +89,19 @@ class Lane:
 
 	def update_cars(self):
 		remove_cars = []
-		for i in range(len(self.car_list)):
-			car = self.car_list[i]
-			car.location = self.next_location(car.location, car.speed)
+		for car in self.car_list:
 			if car.location[0]>=8 or car.location[0]<=0 or car.location[1]>=8 or car.location[1]<=0:
 				remove_cars.append(car)
+				#self.car_list.remove(car)
 		if len(remove_cars) > 0:
-
 			for car in remove_cars:
 				self.car_list.remove(car)
 		for j in range(len(self.car_list)):
-			car = self.car_list[j]
+			#car = self.car_list[j]
 			if j-1 >=0:
-				car.neighbors[0] = self.car_list[j-1]
+				self.car_list[j].neighbors[0] = self.car_list[j-1]
 			if j+1 < len(self.car_list):
-				car.neighbors[1] = self.car_list[j+1]
+				self.car_list[j].neighbors[1] = self.car_list[j+1]
 		return remove_cars
 
 
