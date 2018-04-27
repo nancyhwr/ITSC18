@@ -17,14 +17,14 @@ import numpy as np
 nodes = ['a', 'b','c','d','e','f','g','h']
 edges = {'a':['b','d','e'], 'b':['a','g','f'],'c':['g','f','d'], 'd': ['a','c','h'], 'e':['a','h','f'],'f':['b','c','e'],'g':['b','c','h'],'h':['d','e','g']}
 stream_rates = {'a':5, 'b': 8,'c':2,'d':5,'e':2,'f':4,'g':3,'h':8}
-stream_range = [10, 20] # light: 10-20; busy: 20-30; jam: >30 [30-100 [30-50]
+stream_range = [15, 25] # light: 10-20; busy: 20-30; jam: >30 [30-100 [30-50]
 graph = Graph(nodes, edges, stream_rates)
-threshold = 100 #should be a constant value  2*stream_range[1]
+threshold = 70 #should be a constant value  2*stream_range[1] 100
 
-total_duration = 120  #240
-minimum_waiting_time = 15  #60  120/8 = 15
+total_duration = 12 #120  #240
+minimum_waiting_time = 2 #15 
 speed_same = 0.05
-L = 8
+L = 5
 conflicts ={'a':['c','f','g','h'], 'b':['c','e','d','h'],'c':['b','e','a','h'],'d':['b','g','e','f'],'e':['d','g','c','b'],
 			'f':['d','a','g','h'],'g':['f','a','e','d'],'h':['f','c','a','b']}
 
@@ -46,11 +46,11 @@ solution = {(-1, -1):[-1000, -1000], (0, -1):[-1000, -1000], (1, -1):[-1000, -10
 				(-1, 0):[-1000, -1000], (0, 0):[-1000, -1000], (1, 0):[-1000, -1000],
 				(-1, 1):[-1000, -1000], (0, 1):[-1000, -1000], (1, 1):[-1000, -1000]}
 
-baseline = [[(['a','b'],13),(['c','d'],7),(['e','f'],6),(['g','h'],11)],
-[(['a','d'],10),(['h','e'],10),(['c','f'],6),(['g','b'],11)],
-[(['a','e'],7),(['h','d'],13),(['e','f'],6),(['g','b'],11)],
-[(['a','e'],7),(['h','d'],13),(['c','g'],5),(['f','b'],12)],
-[(['h','e'],10),(['a','d'],10),(['b','f'],12),(['g','c'],5)]]
+baseline_groups = [[['a','b'], ['c','d'],['e','f'],['g','h']],
+[['a','d'],['h','e'],['c','f'],['g','b']],
+[['a','e'],['h','d'],['e','f'],['g','b']],
+[['a','e'],['h','d'],['c','g'],['f','b']],
+[['h','e'],['a','d'],['b','f'],['g','c']]]
 
 
 ## Calculate the distances among pairs of cars on the same lane
@@ -95,7 +95,7 @@ def tellCollapse(cars):
 		for j in range(i+1, len(cars)):
 			#print(cars[i].location, cars[j].location)
 			dis = distance(cars[i].predict_location(),cars[j].predict_location())
-			if dis <= cross_crash_threshold:
+			if dis <= cross_crash_threshold and cars[i].name != cars[j].name:
 				pre_accident = pre_accident + 1
 				# the accident is predicted on the same lane. 
 				if cars[i].road_name == cars[j].road_name:
@@ -246,8 +246,10 @@ def remove_accidents(all_cars, accident_cars):
 
 # calculate the probability of generating a car within a second. 
 def generate_car(stream, speed):
-	s = speed * 2000
-	return (stream*s)/3600
+
+	return 20/stream
+	# s = speed * 2000
+	# return (stream*s)/3600
 
 
 def current_accident(all_cars):
@@ -260,18 +262,22 @@ def current_accident(all_cars):
 				if all_cars[i] not in crash_cars:
 					crash_cars.append(all_cars[i])
 				if all_cars[j] not in crash_cars:
-					crash_cars.append(all_cars[j])
-				
+					crash_cars.append(all_cars[j])		
 	return count, crash_cars
+	#return crash_cars
 
 
 def remove_crash_cars(car_list):
 	for car in car_list:
 		lane = car.road_name
 		lane_list[lane].car_list.remove(car)
+
+def form_baseline(groups, stream):
+	return [(groups[i], stream[str(groups[i][0])]+ stream[str(groups[i][1])]) for i in range(len(groups))]
+
 ###############################################################################################################################################
 
-rounds = 10
+rounds = 20
 experiment = 10
 deno = rounds*experiment
 
@@ -282,19 +288,21 @@ stat_pred_accident = []
 
 
 for t in range(experiment):
+	#print('[experiment] = ', t)
 	
 	dynamic_change(stream_rates,stream_range)
 	i_nodes = copy.deepcopy(nodes)
 	i_edges = copy.deepcopy(edges)
 	i_stream_rate = copy.deepcopy(stream_rates)
 	graph = Graph(i_nodes, i_edges, i_stream_rate)
-	#coalitions = dk.coalition(graph, i_stream_rate,threshold)
-	coalitions = baseline[1]
+	coalitions = dk.coalition(graph, i_stream_rate,threshold)	
+	#coalitions = form_baseline(baseline_groups[4], i_stream_rate)
+	
 	group_lanes = [e[0] for e in coalitions]
 	group_streams = [e[1] for e in coalitions]
 	interval_times = interval_time(group_streams, total_duration,minimum_waiting_time)
 	streams = {lane: stream_rates[lane] for lane in nodes}
-	prob_car = {lane: generate_car(streams[lane], 0.025) for lane in nodes}
+	prob_car = {lane: stream_rates[lane]/20 for lane in nodes} #0.25
 
 	total_number = 0
 	pass_cars = 0
@@ -302,10 +310,14 @@ for t in range(experiment):
 	pre_acc = 0
 
 	for i in range(rounds):
+		
+		# we calculate by every 10 seconds. 
 		#dynamic_change(stream_rates,stream_range)
 		for c in range(len(coalitions)):
 			group = coalitions[c][0]
-			for j in range(int(interval_times[c])):
+
+			for j in range(int(interval_times[c])):  #every 10 seconds
+
 				all_cars = []
 				for lane in group:
 					all_cars = all_cars + lane_list[lane].car_list
@@ -314,18 +326,21 @@ for t in range(experiment):
 				accident = accident + accident_analysis[0]
 				remove_crash_cars(accident_analysis[1])
 				
-				for lane in group:
-					pass_cars = pass_cars + lane_list[lane].move_all()
-					if random.uniform(0, 1) < prob_car[lane]:
-						lane_list[lane].car_list.append(Car(lane, lane+str(i)))
-	
 
+				for s in range(20):  #each unite represent 0.5 second
+					for lane in group:
+						pass_cars = pass_cars + lane_list[lane].move_all()
+						if random.uniform(0, 1) < prob_car[lane]:
+							lane_list[lane].car_list.append(Car(lane, lane+str(i)))
+	
+					#print('accident = ', accident)
 	stat_pass_cars.append(pass_cars/rounds)
 	stat_accident.append(accident/rounds)
 	stat_pred_accident.append(pre_acc/rounds)
 
-print('baseline')
-print('[stat_throughput]= ', stat_pass_cars)
-print('[stat_accident]= ', stat_accident)
-print('[stat_pred_accident]= ', stat_pred_accident)
+
+print('psfa')
+print('throughput_psfa_= ', stat_pass_cars)
+print('acc_b_= ', stat_accident)
+print('pre_accident_= ', stat_pred_accident)
 
